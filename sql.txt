@@ -1,0 +1,125 @@
+use northwind
+
+
+--productionlogbook tábla létrehozása, ide kerülnek a tevékenységek a fröccs gépről
+CREATE TABLE productionlogbook(
+	productionlogbook_id int NOT NULL, --figyelem!
+	productionlogbook_date datetime,
+	productionlogbook_trigger_itemname varchar(50),
+	productionlogbook_machines varchar(50),
+	productionlogbook_articles varchar(50),
+	productionlogbook_molds varchar(50),
+	productionlogbook_workorders varchar(50),
+ CONSTRAINT pk_id PRIMARY KEY  
+(
+	productionlogbook_id 
+));
+
+--log beszúrás, ekkor jön az adat a fröccs gépről
+INSERT INTO  productionlogbook (productionlogbook_id, productionlogbook_date,
+				productionlogbook_trigger_itemname, productionlogbook_machines,
+				productionlogbook_articles, productionlogbook_molds,
+				productionlogbook_workorders) 
+VALUES (8869328, CAST('2015-12-25 15:32:06.427' AS DateTime), '13_QEP Kék láda', 'FGP021', 'KTY0387', 'SZR0727', '21-000383714');
+
+select * from productionlogbook;
+delete from productionlogbook;
+drop table productionlogbook;
+
+
+
+--tig_log tábla létrehozása, ide kerülnek a logolt tevékenységek laza csatolással
+CREATE TABLE tig_log(
+	log_id int NOT NULL,
+	productionlogbook_date datetime,
+	productionlogbook_trigger_itemname varchar(50),
+ CONSTRAINT pk_log_id PRIMARY KEY  
+(
+	log_id 
+));
+
+select * from tig_log;
+delete from tig_log;
+drop table tig_log;
+
+
+
+
+--tig_activity tábláa létrehozása, ide mentjük a szükséges sorokat, ami majd feldolgozásra kerül
+CREATE TABLE tig_activity(
+	productionlogbook_id int NOT NULL, --figyelem!
+	productionlogbook_date datetime,
+	productionlogbook_trigger_itemname varchar(50),
+	productionlogbook_machines varchar(50),
+	productionlogbook_articles varchar(50),
+	productionlogbook_molds varchar(50),
+	productionlogbook_workorders varchar(50),
+ CONSTRAINT tig_activity_pk PRIMARY KEY  
+(
+	productionlogbook_id 
+));
+
+select * from tig_activity;
+delete from tig_activity;
+drop table tig_activity;
+
+
+
+
+--drop trigger
+drop trigger tr_tig_log;
+
+--create trigger
+create trigger tr_tig_log on [productionlogbook] for insert as 
+declare @productionlogbook_id int
+select @productionlogbook_id=productionlogbook_id from inserted
+print(@productionlogbook_id)
+if update(productionlogbook_id)	begin		--ha a táblába beszúrás történik, akkor updatelődik a tábla elsődleges kulcsa
+	insert tig_log (log_id, productionlogbook_date, productionlogbook_trigger_itemname)
+			select productionlogbook_id, productionlogbook_date, productionlogbook_trigger_itemname from inserted		--ebbe a táblába jöhet több adat, mert 78 gép van,  TIG-el
+	print 'Új adat érkezett'
+end
+
+
+--tárolt eljárás törlése
+drop proc save_tig_activity;
+
+--tárolt eljárás készítése, minden reggel fut le, mert akkor nézik meg
+create procedure save_tig_activity
+as
+begin try
+	print 'Beszúrás'
+	insert tig_activity (
+		productionlogbook_id,
+		productionlogbook_date,
+		productionlogbook_trigger_itemname,
+		productionlogbook_machines,
+		productionlogbook_articles,
+		productionlogbook_molds,
+		productionlogbook_workorders
+	)
+		select 
+			productionlogbook_id,
+			tig_log.productionlogbook_date,
+			tig_log.productionlogbook_trigger_itemname,
+			productionlogbook_machines,
+			productionlogbook_articles,
+			productionlogbook_molds,
+			productionlogbook_workorders
+		 from productionlogbook inner join tig_log
+				on tig_log.log_id = productionlogbook.productionlogbook_id
+				where productionlogbook.productionlogbook_trigger_itemname = '13_QEP Kék láda'
+					  or productionlogbook.productionlogbook_trigger_itemname = '17_Rendelés váltás'
+					  or productionlogbook.productionlogbook_trigger_itemname = '16_Technológiai próba';
+		delete from tig_log;
+
+end try
+begin catch
+	print 'Hiba az adatmásolás alatt.'
+end catch
+
+--tárolt eljárás futtatása
+exec dbo.save_tig_activity;
+
+select * from tig_log;
+select * from tig_activity;
